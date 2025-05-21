@@ -45,7 +45,7 @@ class VideoViewModel: ObservableObject {
 
     private let baseID = "appqb5aHMDsKPQZdI"
     private let tableName = "Videos"
-    private let apiKey = "patMHfmylBKNNjazG.98888312f0b20183b2073742de57a8915a6fd00165f621e616cb5d3c9bf5c14d"
+    private let apiKey = "patME7YvFXBbm1l1q.6e72c32928ce37e19811a3e630ecce2c39be4671bbe5ab3bd1189087827bad1c"
 
     var filteredVideos: [Video] {
         if searchText.isEmpty {
@@ -157,6 +157,16 @@ struct ContentView: View {
         GridItem(.flexible())
     ]
     
+    // NUOVI STATI PER LA FUNZIONALITÀ DI UPLOAD
+     @State private var showingVideoSourceActionSheet = false // Controlla la visibilità dell'action sheet (registra/scegli)
+     @State private var showingImagePicker = false // Controlla la visibilità del picker (fotocamera/galleria)
+     @State private var sourceType: UIImagePickerController.SourceType = .photoLibrary // Determina la sorgente del picker
+     @State private var selectedVideoURL: URL? = nil // Contiene l'URL del video selezionato/registrato
+     @State private var showingVideoUploadSheet = false // Controlla la visibilità della form di upload
+     @State private var isUploading = false // Indica se l'upload è in corso
+     @State private var uploadStatusMessage: String? = nil // Messaggio di stato per l'utente (es. "Upload completato!")
+     // Fine NUOVI STATI
+    
     var body: some View {
         NavigationView {
             VStack {
@@ -226,6 +236,73 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Video")
+            //Tasto Plus
+            .navigationBarItems(trailing:
+                Button(action: {
+                    showingVideoSourceActionSheet = true // Quando cliccato, mostra l'action sheet
+                }) {
+                    Image(systemName: "plus.circle.fill") // Icona del pulsante "+"
+                        .font(.title2) // Dimensione dell'icona
+                        .foregroundColor(.blue) // Colore dell'icona
+                }
+            )
+            //ACTION SHEET
+            .actionSheet(isPresented: $showingVideoSourceActionSheet) {
+                ActionSheet(
+                    title: Text("Seleziona Sorgente Video"),
+                    buttons: [
+                        .default(Text("Registra Video")) {
+                            self.sourceType = .camera // Imposta la sorgente a fotocamera
+                            self.showingImagePicker = true // Mostra il picker
+                        },
+                        .default(Text("Scegli dalla Libreria")) {
+                            self.sourceType = .photoLibrary // Imposta la sorgente a libreria
+                            self.showingImagePicker = true // Mostra il picker
+                        },
+                        .cancel() // Pulsante per annullare
+                    ]
+                )
+            }
+            //PRESENTAZIONE DEL PICKER
+            .sheet(isPresented: $showingImagePicker) {
+                // Utilizza PHPickerViewController (iOS 14+) o UIImagePickerController (per compatibilità)
+                if sourceType == .photoLibrary {
+                    if #available(iOS 14, *) {
+                        // iOS 14 e successivi: usa PHPickerViewController
+                        VideoPicker(selectedVideoURL: $selectedVideoURL, showingSheet: $showingImagePicker)
+                    } else {
+                        // iOS precedenti al 14: fallback a UIImagePickerController
+                        ImagePicker(selectedVideoURL: $selectedVideoURL, showingSheet: $showingImagePicker, sourceType: .photoLibrary)
+                    }
+                } else { // sourceType == .camera
+                    // Sempre UIImagePickerController per la fotocamera
+                    ImagePicker(selectedVideoURL: $selectedVideoURL, showingSheet: $showingImagePicker, sourceType: .camera)
+                }
+            }
+            // Fine: NUOVE RIGHE PER LA PRESENTAZIONE DEL PICKER
+
+            // Inizio: NUOVE RIGHE PER OSSERVARE IL VIDEO SELEZIONATO E MOSTRARE LA FORM DI UPLOAD
+            .onChange(of: selectedVideoURL) { oldURL, newURL in // Ora ha due parametri: oldURL e newURL
+                if newURL != nil {
+                    showingVideoUploadSheet = true
+                }
+            }
+            // Fine: NUOVE RIGHE PER OSSERVARE IL VIDEO SELEZIONATO
+
+            // Inizio: NUOVE RIGHE PER LA PRESENTAZIONE DELLA FORM DI UPLOAD
+            .sheet(isPresented: $showingVideoUploadSheet) {
+                VideoUploadView(videoURL: $selectedVideoURL,
+                                onUploadComplete: { success, message in
+                                    self.uploadStatusMessage = message // Salva il messaggio di stato
+                                    self.isUploading = false // Indica che l'upload è finito
+                                    if success {
+                                        // Puoi decidere qui se ricaricare i video principali immediatamente
+                                        // (dipende se l'automazione di Airtable è istantanea)
+                                        // viewModel.fetchVideos()
+                                    }
+                                },
+                                isUploading: $isUploading)
+            }
             .onAppear {
                 viewModel.fetchVideos()
             }
