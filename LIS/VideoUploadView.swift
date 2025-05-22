@@ -16,17 +16,19 @@ struct VideoUploadView: View {
     // Callback per informare ContentView dell'esito dell'upload
     var onUploadComplete: (Bool, String) -> Void
     // Binding per indicare lo stato di caricamento (mostra un ProgressView)
-    @Binding var isUploading: Bool
-
+    
+    @State private var isUploading: Bool = false
     @State private var suggestedTitle: String = ""
     @State private var userEmail: String = ""
     @State private var uploadProgress: Double = 0.0 // Progresso di caricamento ad Airtable
     @State private var currentStep: String = "Pronto per l'invio ad Airtable..." // Messaggio di stato
     @State private var errorMessage: String? = nil // Per mostrare errori all'utente
 
+    @State private var compressionProgress: Double = 0.0 // Progresso della compressione video (0.0 a 1.0)
+    
     @Environment(\.dismiss) var dismiss // Per chiudere la sheet SwiftUI
 
-    // --- SOSTITUISCI QUESTI CON I TUOI DATI AIRTABLE ---
+    // ---DATI AIRTABLE ---
     private let airtableBaseID = "appqb5aHMDsKPQZdI" // Il tuo Base ID di Airtable
     private let airtableTableName = "Video in Attesa di Approvazione" // Il nome esatto della tabella creata nel Punto 1
     // ATTENZIONE: Usare la chiave API direttamente nel codice client NON è la pratica più sicura
@@ -34,6 +36,11 @@ struct VideoUploadView: View {
     // Assicurati che questa API Key abbia solo permessi di scrittura sulla tabella "Video in Attesa di Approvazione".
     private let airtableAPIKey = "patME7YvFXBbm1l1q.6e72c32928ce37e19811a3e630ecce2c39be4671bbe5ab3bd1189087827bad1c" // La tua API Key Airtable
     // ---------------------------------------------------
+    
+    // ---VARIABILI CLOUDINARY ---
+    private let cloudinaryCloudName = "dpdus5caf" // !!! SOSTITUISCI QUI CON IL TUO CLOUD NAME VERO !!!
+    private let cloudinaryUploadPreset = "video_upload_preset" // !!! SOSTITUISCI QUI CON IL NOME DEL TUO UPLOAD PRESET VERO !!!
+    // ------------------------------------
 
     var body: some View {
         NavigationView {
@@ -98,32 +105,159 @@ struct VideoUploadView: View {
         }
     }
 
-    // Funzione asincrona che gestisce il processo di upload
-    private func handleVideoUpload() async {
-        guard let videoURL = videoURL else {
-            errorMessage = "Nessun video selezionato."
-            return
+    
+    // Funzione per comprimere il video
+    private func compressVideo(originalURL: URL) async throws -> URL {
+        return try await withCheckedThrowingContinuation { continuation in
+            let asset = AVAsset(url: originalURL)
+            // Scegli la qualità di compressione: MediumQuality è un buon compromesso
+            // Puoi provare HighestQuality per la massima fedeltà, ma files più grandi.
+            let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetMediumQuality)!
+
+            // Crea un URL temporaneo dove salvare il video compresso
+            let tempDirectory = FileManager.default.temporaryDirectory
+            let outputURL = tempDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
+
+            exportSession.outputURL = outputURL
+            exportSession.outputFileType = .mov // Puoi usare anche .mp4 se preferisci, ma .mov è comune su iOS
+
+            exportSession.exportAsynchronously {
+                switch exportSession.status {
+                case .completed:
+                    continuation.resume(returning: outputURL)
+                case .failed:
+                    continuation.resume(throwing: exportSession.error ?? NSError(domain: "VideoCompression", code: 0, userInfo: [NSLocalizedDescriptionKey: "Errore sconosciuto nella compressione video"]))
+                case .cancelled:
+                    continuation.resume(throwing: NSError(domain: "VideoCompression", code: 0, userInfo: [NSLocalizedDescriptionKey: "Compressione video annullata"]))
+                default:
+                    // Per altri stati come .waiting, .exporting, .unknown, non facciamo nulla qui.
+                    // Il continuation attende il completamento, fallimento o annullamento.
+                    break
+                }
+            }
         }
-
-        isUploading = true // Imposta lo stato di caricamento
-        errorMessage = nil // Resetta eventuali errori precedenti
-
-        do {
-            // Invio del file video e dei dati ad Airtable
-            self.currentStep = "Invio video e dati ad Airtable..."
-            try await createAirtableReviewRecordWithVideo(videoURL: videoURL, title: suggestedTitle, email: userEmail)
-
-            self.currentStep = "Completato!"
-            onUploadComplete(true, "Video inviato con successo per la revisione!") // Invia feedback a ContentView
-            dismiss() // Chiude la sheet dopo il successo
-
-        } catch {
-            self.errorMessage = "Errore durante l'invio: \(error.localizedDescription)"
-            onUploadComplete(false, "Errore durante l'invio del video.") // Invia feedback di errore
-            print("Upload Error: \(error.localizedDescription)")
-        }
-        isUploading = false // Termina lo stato di caricamento
     }
+    
+    // Funzione per caricare il video su Cloudinary
+    private func uploadVideoToCloudinary(fileURL: URL) async throws -> URL {
+        return try await withCheckedThrowingContinuation { continuation in
+            // Controlla che il tuo Cloud Name sia valido e formi un URL corretto
+            guard let uploadURL = URL(string: "https://api.cloudinary.com/v1_1/\(cloudinaryCloudName)/video/upload") else {
+                continuation.resume(throwing: NSError(domain: "CloudinaryAPI", code: 0, userInfo: [NSLocalizedDescriptionKey: "URL Cloudinary per l'upload non valido."]))
+                return
+            }
+
+            var request = URLRequest(url: uploadURL)
+            request.httpMethod = "POST"
+
+            // Usiamo multipart/form-data per inviare il file
+            let boundary = UUID().uuidString
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+            var body = Data()
+
+            // Aggiungi il campo 'upload_preset' (il nome del preset unsigned che hai creato)
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"upload_preset\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(cloudinaryUploadPreset)\r\n".data(using: .utf8)!)
+
+            // Aggiungi il file video stesso
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
+            // Puoi provare a dedurre il MIME type, ma video/quicktime o video/mp4 sono spesso usati.
+            body.append("Content-Type: video/quicktime\r\n\r\n".data(using: .utf8)!)
+            do {
+                let videoData = try Data(contentsOf: fileURL)
+                body.append(videoData)
+                body.append("\r\n".data(using: .utf8)!)
+            } catch {
+                continuation.resume(throwing: error)
+                return
+            }
+
+            // Chiudi il body della richiesta
+            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+            request.httpBody = body
+
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                DispatchQueue.main.async { // Assicurati che la gestione della risposta avvenga sul main thread
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    // Tentativo di parsare la risposta JSON di Cloudinary
+                    guard let data = data,
+                          let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                          let secureURLString = json["secure_url"] as? String, // Cloudinary restituisce l'URL finale qui
+                          let secureURL = URL(string: secureURLString) else {
+                        let responseString = data.map { String(data: $0, encoding: .utf8) } ?? "No response body"
+                        continuation.resume(throwing: NSError(domain: "CloudinaryAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Risposta Cloudinary non valida o URL mancante. Risposta: \(responseString)"]))
+                        return
+                    }
+
+                    continuation.resume(returning: secureURL) // Restituisce l'URL pubblico del video
+                }
+            }
+            task.resume() // Avvia la richiesta di upload
+        }
+    }
+    
+    // Funzione asincrona che gestisce il processo di upload
+    // Funzione principale che gestisce il processo di caricamento del video
+        private func handleVideoUpload() async {
+            guard let videoURL = videoURL else {
+                errorMessage = "Nessun video selezionato."
+                return
+            }
+
+            // Imposta lo stato di caricamento e resetta gli errori
+            isUploading = true
+            errorMessage = nil
+
+            do {
+                // 1. Compressione del video (opzionale ma consigliata per ridurre le dimensioni)
+                // Aggiorna lo stato per l'utente
+                self.currentStep = "Compressione video..."
+                // Chiama la funzione di compressione
+                let compressedURL = try await compressVideo(originalURL: videoURL)
+                // Aggiorna la UI per mostrare che la compressione è completa
+                DispatchQueue.main.async {
+                    self.compressionProgress = 1.0 // Imposta il progresso a 1.0 al completamento della compressione
+                }
+
+
+                // 2. Upload del video compresso su Cloudinary
+                self.currentStep = "Caricamento video su Cloudinary..."
+                // Chiama la funzione di upload su Cloudinary
+                let cloudinaryPublicURL = try await uploadVideoToCloudinary(fileURL: compressedURL)
+                // Aggiorna la UI per mostrare che l'upload Cloudinary è completo
+                DispatchQueue.main.async {
+                     self.uploadProgress = 1.0 // Imposta il progresso a 1.0 al completamento dell'upload Cloudinary
+                }
+
+
+                // 3. Invio dell'URL pubblico di Cloudinary e dei dati ad Airtable
+                self.currentStep = "Invio dati ad Airtable..."
+                // Chiama la funzione Airtable, passando l'URL pubblico di Cloudinary
+                try await createAirtableReviewRecordWithVideo(videoURL: cloudinaryPublicURL, title: suggestedTitle, email: userEmail)
+
+
+                // Se tutto va a buon fine
+                self.currentStep = "Completato!"
+                onUploadComplete(true, "Video inviato con successo per la revisione!") // Invia feedback a ContentView
+                dismiss() // Chiude la sheet dopo il successo
+
+            } catch {
+                // Gestione degli errori
+                self.errorMessage = "Errore durante l'invio: \(error.localizedDescription)"
+                onUploadComplete(false, "Errore durante l'invio del video.") // Invia feedback di errore
+                print("Upload Error: \(error.localizedDescription)")
+            }
+            // Imposta lo stato di caricamento a falso sia in caso di successo che di errore
+            isUploading = false
+        }
 
     // MARK: - Creazione Record Airtable con File Video
 

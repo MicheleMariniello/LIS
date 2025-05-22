@@ -42,11 +42,11 @@ class VideoViewModel: ObservableObject {
     @Published var videosByLetter: [String: [Video]] = [:]
     // Array delle lettere disponibili, ordinate alfabeticamente
     @Published var availableLetters: [String] = []
-
+    
     private let baseID = "appqb5aHMDsKPQZdI"
     private let tableName = "Videos"
     private let apiKey = "patME7YvFXBbm1l1q.6e72c32928ce37e19811a3e630ecce2c39be4671bbe5ab3bd1189087827bad1c"
-
+    
     var filteredVideos: [Video] {
         if searchText.isEmpty {
             return videos
@@ -112,12 +112,12 @@ class VideoViewModel: ObservableObject {
             self.isSearching = false
         }
     }
-
+    
     func fetchVideos() {
         guard let url = URL(string: "https://api.airtable.com/v0/\(baseID)/\(tableName)") else { return }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
+        
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data else {
                 print("Nessun dato ricevuto")
@@ -158,14 +158,14 @@ struct ContentView: View {
     ]
     
     // NUOVI STATI PER LA FUNZIONALITÀ DI UPLOAD
-     @State private var showingVideoSourceActionSheet = false // Controlla la visibilità dell'action sheet (registra/scegli)
-     @State private var showingImagePicker = false // Controlla la visibilità del picker (fotocamera/galleria)
-     @State private var sourceType: UIImagePickerController.SourceType = .photoLibrary // Determina la sorgente del picker
-     @State private var selectedVideoURL: URL? = nil // Contiene l'URL del video selezionato/registrato
-     @State private var showingVideoUploadSheet = false // Controlla la visibilità della form di upload
-     @State private var isUploading = false // Indica se l'upload è in corso
-     @State private var uploadStatusMessage: String? = nil // Messaggio di stato per l'utente (es. "Upload completato!")
-     // Fine NUOVI STATI
+    @State private var showingVideoSourceActionSheet = false // Controlla la visibilità dell'action sheet (registra/scegli)
+    @State private var showingImagePicker = false // Controlla la visibilità del picker (fotocamera/galleria)
+    @State private var sourceType: UIImagePickerController.SourceType = .photoLibrary // Determina la sorgente del picker
+    @State private var selectedVideoURL: URL? = nil // Contiene l'URL del video selezionato/registrato
+    @State private var showingVideoUploadSheet = false // Controlla la visibilità della form di upload
+    @State private var isUploading = false // Indica se l'upload è in corso
+    @State private var uploadStatusMessage: String? = nil // Messaggio di stato per l'utente (es. "Upload completato!")
+    // Fine NUOVI STATI
     
     var body: some View {
         NavigationView {
@@ -238,13 +238,13 @@ struct ContentView: View {
             .navigationTitle("Video")
             //Tasto Plus
             .navigationBarItems(trailing:
-                Button(action: {
-                    showingVideoSourceActionSheet = true // Quando cliccato, mostra l'action sheet
-                }) {
-                    Image(systemName: "plus.circle.fill") // Icona del pulsante "+"
-                        .font(.title2) // Dimensione dell'icona
-                        .foregroundColor(.blue) // Colore dell'icona
-                }
+                                    Button(action: {
+                showingVideoSourceActionSheet = true // Quando cliccato, mostra l'action sheet
+            }) {
+                Image(systemName: "plus.circle.fill") // Icona del pulsante "+"
+                    .font(.title2) // Dimensione dell'icona
+                    .foregroundColor(.blue) // Colore dell'icona
+            }
             )
             //ACTION SHEET
             .actionSheet(isPresented: $showingVideoSourceActionSheet) {
@@ -280,7 +280,7 @@ struct ContentView: View {
                 }
             }
             // Fine: NUOVE RIGHE PER LA PRESENTAZIONE DEL PICKER
-
+            
             // Inizio: NUOVE RIGHE PER OSSERVARE IL VIDEO SELEZIONATO E MOSTRARE LA FORM DI UPLOAD
             .onChange(of: selectedVideoURL) { oldURL, newURL in // Ora ha due parametri: oldURL e newURL
                 if newURL != nil {
@@ -288,20 +288,20 @@ struct ContentView: View {
                 }
             }
             // Fine: NUOVE RIGHE PER OSSERVARE IL VIDEO SELEZIONATO
-
+            
             // Inizio: NUOVE RIGHE PER LA PRESENTAZIONE DELLA FORM DI UPLOAD
             .sheet(isPresented: $showingVideoUploadSheet) {
                 VideoUploadView(videoURL: $selectedVideoURL,
                                 onUploadComplete: { success, message in
-                                    self.uploadStatusMessage = message // Salva il messaggio di stato
-                                    self.isUploading = false // Indica che l'upload è finito
-                                    if success {
-                                        // Puoi decidere qui se ricaricare i video principali immediatamente
-                                        // (dipende se l'automazione di Airtable è istantanea)
-                                        // viewModel.fetchVideos()
-                                    }
-                                },
-                                isUploading: $isUploading)
+                    self.uploadStatusMessage = message // Salva il messaggio di stato
+                    self.isUploading = false // Indica che l'upload è finito
+                    if success {
+                        // Puoi decidere qui se ricaricare i video principali immediatamente
+                        // (dipende se l'automazione di Airtable è istantanea)
+                        // viewModel.fetchVideos()
+                    }
+                }
+                )
             }
             .onAppear {
                 viewModel.fetchVideos()
@@ -440,7 +440,7 @@ struct VideoCardView: View {
 
 struct VideoPlayerView: View {
     let videoAttachment: Attachment?
-
+    
     var body: some View {
         if let attachment = videoAttachment, let url = URL(string: attachment.url) {
             VideoPlayer(player: AVPlayer(url: url))
